@@ -1,12 +1,11 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAPeuZRLZMhM97u7pp5YFLK72I9C26xgtI",
   authDomain: "gravitywebapp-ea5c0.firebaseapp.com",
+  databaseURL: "https://gravitywebapp-ea5c0-default-rtdb.firebaseio.com",
   projectId: "gravitywebapp-ea5c0",
   storageBucket: "gravitywebapp-ea5c0.firebasestorage.app",
   messagingSenderId: "84069356895",
@@ -15,3 +14,6 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+export { auth, app };
