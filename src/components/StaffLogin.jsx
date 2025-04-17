@@ -1,26 +1,34 @@
 // src/components/StaffLogin.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 
 const StaffLogin = ({ setIsAdmin }) => {
+
+  const auth = getAuth();
+  const navigate = useNavigate();
+
+  const [authing, setAuthing] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const navigate = useNavigate();
-
-  const handleLogin = (e) => {
+  
+  const signInWithEmail = async (e) => {
     e.preventDefault();
-
-    // Dummy credentials for staff login
-    const adminEmail = 'admin@example.com';
-    const adminPassword = 'password123';
-
-    if (email === adminEmail && password === adminPassword) {
-      setIsAdmin(true);
-      navigate('/'); // Redirect to home page
-    } else {
-      setError('Invalid email or password');
-    }
+    setAuthing(true);
+    setError('');
+  
+    signInWithEmailAndPassword(auth, email, password)
+      .then((response) => {
+        console.log(response.user.uid);
+        navigate('/');
+        setIsAdmin(true);
+      })
+      .catch((error) => {
+        console.error(error);
+        setError(error.message);
+        setAuthing(false);
+      });
   };
 
   return (
@@ -28,7 +36,7 @@ const StaffLogin = ({ setIsAdmin }) => {
       <div className="bg-white text-black p-8 rounded-lg shadow-lg w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-center">Staff Login</h2>
         {error && <p className="text-red-500 text-sm text-center mb-4">{error}</p>}
-        <form onSubmit={handleLogin} className="flex flex-col space-y-4">
+        <form onSubmit={signInWithEmail} className="flex flex-col space-y-4">
           <input
             type="email"
             placeholder="Email"
