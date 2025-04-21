@@ -39,8 +39,9 @@ const HeroSection = () => {
         >
           Welcome to Gravity
         </h1>
+        
         <p className="text-lg md:text-2xl mb-8">
-          Empowering communities through meaningful events and connections.
+          "The Keyword is LOVE!"
         </p>
         <button
           onClick={handleScroll} // Custom scroll function
