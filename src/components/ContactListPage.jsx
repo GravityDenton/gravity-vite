@@ -356,7 +356,7 @@ const ContactListPage = () => {
     // Reset fields if restoring
     const updatedContact = selectedTable === 'inactive'
     ? { ...contact, noResponse: 0, contacted: false } // restoring: reset fields
-    : { ...contact, noResponse: 1, contacted: true }; // do not contact: set noResponse to 1
+    : { ...contact, noResponse: 3, contacted: true }; // do not contact: set noResponse to 1
   
   
     try {
