@@ -22,5 +22,9 @@
   - "firebase deploy"
   - This step should be optional since any commits to the repositoy should automatically deploy to firebase
 
-- If struggling with firebase deploying process, follow this YouTube video:
+- If struggling with firebase deploying process, follow this YouTube video exactly:
   - https://www.youtube.com/watch?v=uWA6gCJiOoQ&t=589s
+ 
+- If for whatever reason you are initializing before deploying to firebase make sure to add this line of code to _firebase.json_ after rewrites
+  - "predeploy" : ["npm run build"]
+  - This makes sure that all dependancies needed are downloaded when deploying
