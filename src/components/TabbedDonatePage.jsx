@@ -1,20 +1,42 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
+import { db } from "/firebase";
+import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore';
+
 
 const TabbedDonatePage = ({ isAdmin }) => {
   const [activeTab, setActiveTab] = useState('donate');
-  const [needsItems, setNeedsItems] = useState([]); // Initially empty list
+  const [needsItems, setNeedsItems] = useState([]);
   const [newItem, setNewItem] = useState("");
 
-  const addItem = () => {
+  useEffect(() => {
+    const fetchItems = async () => {
+      const snapshot = await getDocs(collection(db, 'needsItems'));
+      const items = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+      setNeedsItems(items);
+    };
+    fetchItems();
+  }, []);
+
+  const addItem = async () => {
     if (newItem.trim()) {
-      setNeedsItems([...needsItems, newItem.trim()]);
-      setNewItem("");
+      try {
+        const docRef = await addDoc(collection(db, 'needsItems'), { name: newItem.trim() });
+        setNeedsItems([...needsItems, { id: docRef.id, name: newItem.trim() }]);
+        setNewItem("");
+      } catch (error) {
+        console.error("Error adding item:", error);
+      }
     }
   };
 
-  const deleteItem = (index) => {
-    const updatedItems = needsItems.filter((_, i) => i !== index);
-    setNeedsItems(updatedItems);
+  const deleteItem = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'needsItems', id));
+      setNeedsItems(needsItems.filter(item => item.id !== id));
+    } catch (error) {
+      console.error("Error deleting item:", error);
+    }
   };
 
   return (
@@ -76,17 +98,17 @@ const TabbedDonatePage = ({ isAdmin }) => {
                 ) : (
                   <ul className="space-y-6">
                     {needsItems.map((item, index) => (
-                      <li key={index} className="flex items-center justify-between">
+                      <li key={item.id} className="flex items-center justify-between">
                         <div className="flex items-center">
                           <span className="inline-block">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-blue-500" viewBox="0 0 8 8">
                               <circle cx="4" cy="4" r="3" fill="currentColor" />
                             </svg>
                           </span>
-                          <h3 className="text-xl font-bold text-blue-500 ml-4">{item}</h3>
+                          <h3 className="text-xl font-bold text-blue-500 ml-4">{item.name}</h3>
                         </div>
                         {isAdmin && (
-                          <button onClick={() => deleteItem(index)} className="text-red-500 hover:text-red-700 text-sm">
+                          <button onClick={() => deleteItem(item.id)} className="text-red-500 hover:text-red-700 text-sm">
                             Delete
                           </button>
                         )}
@@ -118,3 +140,4 @@ const TabbedDonatePage = ({ isAdmin }) => {
 };
 
 export default TabbedDonatePage;
+
