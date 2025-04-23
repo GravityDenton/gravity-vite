@@ -1,13 +1,36 @@
 // ManageEventsPage.jsx
 import React, { useState } from 'react';
+import { useEffect } from 'react';
+import { db } from "/firebase";
+import { collection, addDoc, deleteDoc, doc, getDocs, updateDoc } from 'firebase/firestore';
 
 const ManageEventsPage = ({ events, setEvents }) => {
   const [deleteIndex, setDeleteIndex] = useState(null);
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'events'));
+        const fetchedEvents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setEvents(fetchedEvents);
+      } catch (error) {
+        console.error("Error fetching events:", error);
+      }
+    };
+  
+    fetchEvents();
+  }, []);
 
-  const handleChange = (index, field, value) => {
+  const handleChange = async (index, field, value) => {
     const updatedEvents = [...events];
     updatedEvents[index][field] = value;
     setEvents(updatedEvents);
+  
+    const event = updatedEvents[index];
+    try {
+      await updateDoc(doc(db, 'events', event.id), { ...event, [field]: value });
+    } catch (error) {
+      console.error("Error updating event:", error);
+    }
   };
 
   const handleSave = () => {
@@ -16,16 +39,21 @@ const ManageEventsPage = ({ events, setEvents }) => {
   };
 
   // Function to add a new blank event.
-  const addNewEvent = () => {
+  const addNewEvent = async () => {
     const newEvent = {
-      id: Date.now(), // Unique id based on timestamp.
       name: "",
       date: "",
       description: "",
       details: "",
       imageUrl: "",
     };
-    setEvents([...events, newEvent]);
+  
+    try {
+      const docRef = await addDoc(collection(db, 'events'), newEvent);
+      setEvents([...events, { id: docRef.id, ...newEvent }]);
+    } catch (error) {
+      console.error("Error adding event:", error);
+    }
   };
 
   // Set the index of the event we want to delete (to trigger the modal).
@@ -34,10 +62,16 @@ const ManageEventsPage = ({ events, setEvents }) => {
   };
 
   // When the user confirms deletion:
-  const handleConfirmDelete = () => {
-    const updatedEvents = events.filter((_, i) => i !== deleteIndex);
-    setEvents(updatedEvents);
-    setDeleteIndex(null);
+  const handleConfirmDelete = async () => {
+    try {
+      const eventToDelete = events[deleteIndex];
+      await deleteDoc(doc(db, 'events', eventToDelete.id));
+      const updatedEvents = events.filter((_, i) => i !== deleteIndex);
+      setEvents(updatedEvents);
+      setDeleteIndex(null);
+    } catch (error) {
+      console.error("Error deleting event:", error);
+    }
   };
 
   // Cancel the deletion and close the modal.
