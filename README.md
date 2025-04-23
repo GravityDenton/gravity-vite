@@ -11,6 +11,7 @@
 # Basic Firebase Commands for Future Use
 - To install firebase run command:
   - "npm install firebase"
+  - "npm install -g firebase-tools"
   - This step should be optional since firebase files are already in the repository
 
 - To login to firebase in the terminal run command:
