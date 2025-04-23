@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { FiRefreshCcw, FiTrash } from 'react-icons/fi';
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, setDoc, query, where } from "firebase/firestore";
+import { db } from "/firebase";
+import { useEffect } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 
 const ContactListPage = () => {
   // Both active and inactive contacts start empty.
@@ -61,6 +65,31 @@ const ContactListPage = () => {
     width: '8rem',
   };
 
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const activeSnapshot = await getDocs(collection(db, 'activeContacts'));
+        const activeList = activeSnapshot.docs.map(doc => doc.data());
+        setActiveContacts(activeList);
+
+        const inactiveSnapshot = await getDocs(collection(db, 'inactiveContacts'));
+        const inactiveList = inactiveSnapshot.docs.map(doc => doc.data());
+        setInactiveContacts(inactiveList);
+      } catch (error) {
+        console.error("Error fetching contacts:", error);
+      }
+      try {
+        const snapshot = await getDocs(collection(db, "whoContacts"));
+        const names = snapshot.docs.map(doc => doc.data().name);
+        setWhoContactsList(names);
+      } catch (error) {
+        console.error("Error loading whoContacts:", error);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   // --- Filtering ---
   const handleSearchChange = (e) => setSearch(e.target.value);
   const handleWhoContactsFilterChange = (e) =>
@@ -81,48 +110,111 @@ const ContactListPage = () => {
   });
 
   // --- Table actions for currentContacts ---
-  const handleCheckboxChange = (id) => {
+  const handleCheckboxChange = async (id) => {
+    const table = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+  
+    // Get current list
+    const currentContacts = selectedTable === 'active' ? activeContacts : inactiveContacts;
+    const contactToUpdate = currentContacts.find(contact => contact.id === id);
+    const updatedContacted = !contactToUpdate.contacted;
+  
+    // Update local state
+    const updatedList = currentContacts.map(contact =>
+      contact.id === id ? { ...contact, contacted: updatedContacted } : contact
+    );
+  
     if (selectedTable === 'active') {
-      setActiveContacts(
-        activeContacts.map(contact =>
-          contact.id === id ? { ...contact, contacted: !contact.contacted } : contact
-        )
-      );
+      setActiveContacts(updatedList);
     } else {
-      setInactiveContacts(
-        inactiveContacts.map(contact =>
-          contact.id === id ? { ...contact, contacted: !contact.contacted } : contact
-        )
-      );
+      setInactiveContacts(updatedList);
+    }
+  
+    // Update Firestore
+    try {
+      const q = query(collection(db, table), where("id", "==", id));
+      const snapshot = await getDocs(q);
+      snapshot.forEach(async (docSnap) => {
+        await updateDoc(doc(db, table, docSnap.id), {
+          contacted: updatedContacted,
+        });
+      });
+    } catch (err) {
+      console.error("Error updating contacted checkbox in Firestore:", err);
     }
   };
 
-  const handleIncrement = (id) => {
-    if (selectedTable === 'active') {
-      setActiveContacts(
-        activeContacts.map(contact =>
-          contact.id === id && contact.noResponse < 3
-            ? { ...contact, noResponse: contact.noResponse + 1 }
-            : contact
-        )
-      );
-    } else {
-      setInactiveContacts(
-        inactiveContacts.map(contact =>
-          contact.id === id && contact.noResponse < 3
-            ? { ...contact, noResponse: contact.noResponse + 1 }
-            : contact
-        )
-      );
+  const handleIncrement = async (id) => {
+    const sourceTable = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+    const targetTable = 'inactiveContacts';
+  
+    const currentContacts = selectedTable === 'active' ? activeContacts : inactiveContacts;
+    const contact = currentContacts.find(c => c.id === id);
+  
+    if (!contact) return;
+  
+    const currentCount = parseInt(contact.noResponse || 0, 10); // Convert to number safely
+    const updatedNoResponse = currentCount + 1;
+  
+    // Automatically check the contacted checkbox if noResponse > 0
+    const updatedContact = { 
+      ...contact, 
+      noResponse: updatedNoResponse,
+      contacted: updatedNoResponse > 0 // If noResponse > 0, set contacted to true
+    };
+  
+    try {
+      const q = query(collection(db, sourceTable), where("id", "==", id));
+      const snapshot = await getDocs(q);
+  
+      snapshot.forEach(async (docSnap) => {
+        const ref = doc(db, sourceTable, docSnap.id);
+  
+        if (updatedNoResponse >= 3 && selectedTable === 'active') {
+          // Move contact to inactive table if noResponse >= 3
+          await updateDoc(ref, { noResponse: updatedNoResponse, contacted: updatedContact.contacted });
+          await deleteDoc(ref);
+  
+          // Add to inactive table
+          await addDoc(collection(db, targetTable), updatedContact);
+  
+          // Update local state
+          setActiveContacts(activeContacts.filter(c => c.id !== id));
+          setInactiveContacts([...inactiveContacts, updatedContact]);
+        } else {
+          // Just update noResponse and contacted in the current table
+          await updateDoc(ref, { noResponse: updatedNoResponse, contacted: updatedContact.contacted });
+  
+          if (selectedTable === 'active') {
+            setActiveContacts(
+              activeContacts.map(c => 
+                c.id === id ? updatedContact : c
+              )
+            );
+          } else {
+            setInactiveContacts(
+              inactiveContacts.map(c => 
+                c.id === id ? updatedContact : c
+              )
+            );
+          }
+        }
+      });
+    } catch (error) {
+      console.error("Error updating noResponse in Firestore:", error);
     }
   };
+  
 
   const handleDecrement = (id) => {
     if (selectedTable === 'active') {
       setActiveContacts(
         activeContacts.map(contact =>
           contact.id === id && contact.noResponse > 0
-            ? { ...contact, noResponse: contact.noResponse - 1 }
+            ? {
+                ...contact,
+                noResponse: contact.noResponse - 1,
+                contacted: (contact.noResponse - 1) > 0 // Uncheck the checkbox if noResponse becomes 0
+              }
             : contact
         )
       );
@@ -130,73 +222,96 @@ const ContactListPage = () => {
       setInactiveContacts(
         inactiveContacts.map(contact =>
           contact.id === id && contact.noResponse > 0
-            ? { ...contact, noResponse: contact.noResponse - 1 }
+            ? {
+                ...contact,
+                noResponse: contact.noResponse - 1,
+                contacted: (contact.noResponse - 1) > 0 // Uncheck the checkbox if noResponse becomes 0
+              }
             : contact
         )
       );
     }
   };
 
-  const handleDeleteContact = (id) => {
+  const handleDeleteContact = async (id) => {
+    const table = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+  
+    // Remove from local state
     if (selectedTable === 'active') {
       setActiveContacts(activeContacts.filter(contact => contact.id !== id));
     } else {
       setInactiveContacts(inactiveContacts.filter(contact => contact.id !== id));
     }
-  };
-
-  // --- Move Function with Confirmation ---
-  const confirmMoveContact = (contact) => {
-    setContactToMove(contact);
-    setShowMoveModal(true);
-  };
-
-  const handleMoveContact = () => {
-    if (selectedTable === 'active') {
-      setActiveContacts(activeContacts.filter(c => c.id !== contactToMove.id));
-      setInactiveContacts([...inactiveContacts, contactToMove]);
-    } else {
-      setInactiveContacts(inactiveContacts.filter(c => c.id !== contactToMove.id));
-      setActiveContacts([...activeContacts, contactToMove]);
+  
+    // Remove from Firestore
+    try {
+      const contactsRef = collection(db, table);
+      const q = query(contactsRef, where("id", "==", id));
+      const snapshot = await getDocs(q);
+  
+      for (const docSnap of snapshot.docs) {
+        await deleteDoc(doc(db, table, docSnap.id));
+      }
+    } catch (error) {
+      console.error("Error deleting contact from Firestore:", error);
     }
-    setShowMoveModal(false);
-    setContactToMove(null);
   };
+  
+  
 
   // --- Add / Edit modals ---
   const handleNewContactChange = (e) => {
     setNewContact({ ...newContact, [e.target.name]: e.target.value });
   };
 
-  const handleAddContact = (e) => {
+
+  const handleAddContact = async (e) => {
+    console.log("Submitting new contact:", newContact);
     e.preventDefault();
-    const newId =
-      Math.max(...[...activeContacts, ...inactiveContacts].map(c => c.id), 0) + 1;
-    const contactToAdd = { id: newId, ...newContact, contacted: false, noResponse: 0 };
-    if (selectedTable === 'active') {
-      setActiveContacts([...activeContacts, contactToAdd]);
-    } else {
-      setInactiveContacts([...inactiveContacts, contactToAdd]);
+  
+    const id = uuidv4();
+    const contactWithId = { ...newContact, id, noResponse: 0, contacted: false, };
+  
+    // Save to Firestore
+    try {
+      const table = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+      await setDoc(doc(db, table, id), contactWithId);
+  
+      // Update local state
+      if (selectedTable === 'active') {
+        setActiveContacts(prev => [...prev, contactWithId]);
+      } else {
+        setInactiveContacts(prev => [...prev, contactWithId]);
+      }
+  
+      // Clear form
+      setNewContact({
+        name: '',
+        whoContacts: '',
+        contactNotes: '',
+        textOrDM: '',
+        generalNotes: '',
+        events: '',
+        phone: '',
+        social: '',
+      });
+  
+      setShowAddModal(false);
+    } catch (error) {
+      console.error("Error adding contact:", error);
     }
-    setNewContact({
-      name: '',
-      whoContacts: '',
-      contactNotes: '',
-      textOrDM: '',
-      generalNotes: '',
-      events: '',
-      phone: '',
-      social: '',
-    });
-    setShowAddModal(false);
   };
 
   const handleEditContactChange = (e) => {
     setEditContact({ ...editContact, [e.target.name]: e.target.value });
   };
 
-  const handleUpdateContact = (e) => {
+  const handleUpdateContact = async (e) => {
     e.preventDefault();
+  
+    const table = editContact.sourceTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+  
+    // Update local state
     if (editContact.sourceTable === 'active') {
       setActiveContacts(
         activeContacts.map(contact =>
@@ -210,8 +325,64 @@ const ContactListPage = () => {
         )
       );
     }
+  
+    // Update in Firestore
+    try {
+      const contactsRef = collection(db, table);
+      const q = query(contactsRef, where("id", "==", editContact.id));
+      const snapshot = await getDocs(q);
+  
+      snapshot.forEach(async (docSnap) => {
+        const docRef = doc(db, table, docSnap.id);
+        await updateDoc(docRef, editContact);
+      });
+    } catch (err) {
+      console.error("Error updating contact in Firestore:", err);
+    }
+  
     setEditContact(null);
   };
+
+  const handleMoveContact = async (id) => {
+    const sourceTable = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+    const targetTable = selectedTable === 'active' ? 'inactiveContacts' : 'activeContacts';
+  
+    const sourceContacts = selectedTable === 'active' ? activeContacts : inactiveContacts;
+    const targetContacts = selectedTable === 'active' ? inactiveContacts : activeContacts;
+  
+    const contact = sourceContacts.find(c => c.id === id);
+    if (!contact) return;
+  
+    // Reset fields if restoring
+    const updatedContact = selectedTable === 'inactive'
+    ? { ...contact, noResponse: 0, contacted: false } // restoring: reset fields
+    : { ...contact, noResponse: 1, contacted: true }; // do not contact: set noResponse to 1
+  
+  
+    try {
+      // Find the document in the source table
+      const q = query(collection(db, sourceTable), where("id", "==", id));
+      const snapshot = await getDocs(q);
+  
+      snapshot.forEach(async (docSnap) => {
+        const ref = doc(db, sourceTable, docSnap.id);
+        await deleteDoc(ref); // Remove from source
+        await addDoc(collection(db, targetTable), updatedContact); // Add to target
+  
+        // Update local state
+        if (selectedTable === 'active') {
+          setActiveContacts(activeContacts.filter(c => c.id !== id));
+          setInactiveContacts([...inactiveContacts, updatedContact]);
+        } else {
+          setInactiveContacts(inactiveContacts.filter(c => c.id !== id));
+          setActiveContacts([...activeContacts, updatedContact]);
+        }
+      });
+    } catch (error) {
+      console.error("Error moving contact:", error);
+    }
+  };
+  
 
   const openEditModal = (contact) => {
     setEditContact({ ...contact, sourceTable: selectedTable });
@@ -219,16 +390,37 @@ const ContactListPage = () => {
 
   // --- Who Contacts Management ---
   const handleNewWhoContactChange = (e) => setNewWhoContact(e.target.value);
-  const handleAddWhoContact = (e) => {
+
+  const handleAddWhoContact = async (e) => {
     e.preventDefault();
-    if (newWhoContact && !whoContactsList.includes(newWhoContact)) {
-      setWhoContactsList([...whoContactsList, newWhoContact]);
+  
+    if (!newWhoContact.trim()) return;
+  
+    const updatedList = [...whoContactsList, newWhoContact.trim()];
+    setWhoContactsList(updatedList);
+    setNewWhoContact("");
+  
+    // Save to Firestore
+    try {
+      await addDoc(collection(db, "whoContacts"), { name: newWhoContact.trim() });
+    } catch (error) {
+      console.error("Error saving whoContact:", error);
     }
-    setNewWhoContact('');
   };
 
-  const handleDeleteWhoContact = (name) => {
-    setWhoContactsList(whoContactsList.filter(n => n !== name));
+  const handleDeleteWhoContact = async (name) => {
+    const updatedList = whoContactsList.filter((n) => n !== name);
+    setWhoContactsList(updatedList);
+  
+    try {
+      const q = query(collection(db, "whoContacts"), where("name", "==", name));
+      const snapshot = await getDocs(q);
+      snapshot.forEach(async (docSnap) => {
+        await deleteDoc(doc(db, "whoContacts", docSnap.id));
+      });
+    } catch (error) {
+      console.error("Error deleting whoContact:", error);
+    }
   };
 
   // --- Modal to show full cell text ---
@@ -415,7 +607,7 @@ const ContactListPage = () => {
                     <button onClick={() => setContactToDelete(contact.id)} className="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded">
                       Delete
                     </button>
-                    <button onClick={() => confirmMoveContact(contact)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded">
+                    <button onClick={() => handleMoveContact(contact.id)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded">
                       {selectedTable === 'active' ? 'Do Not Contact' : 'Restore'}
                     </button>
                   </div>
@@ -501,7 +693,7 @@ const ContactListPage = () => {
             <button onClick={() => setShowWhoContactModal(false)} className="absolute top-2 right-2 text-gray-500 hover:text-gray-700">
               X
             </button>
-            <h2 className="text-xl font-bold mb-4">Manage Who Contacts</h2>
+            <h2 className="text-xl font-bold mb-4; text-black">Manage Who Contacts</h2>
             <form onSubmit={handleAddWhoContact} className="grid grid-cols-1 gap-4 mb-4">
               <input type="text" value={newWhoContact} onChange={handleNewWhoContactChange} placeholder="Enter name" className="p-2 border rounded" />
               <button type="submit" className="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded">
@@ -511,7 +703,7 @@ const ContactListPage = () => {
             <ul>
               {whoContactsList.map((name, idx) => (
                 <li key={idx} className="flex items-center justify-between py-1 border-b">
-                  <span>{name}</span>
+                  <span className="text-black">{name}</span>
                   <button onClick={() => handleDeleteWhoContact(name)} className="text-red-500 hover:text-red-600">
                     <FiTrash />
                   </button>
