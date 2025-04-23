@@ -2,7 +2,7 @@
 - Make sure you have Node.js installed
 
 - Open terminal and run the commands:
-  - "npm i"
+  - "npm ci"
   - "npm run build"
  
 - To open start running the site locally run command:
