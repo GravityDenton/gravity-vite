@@ -144,94 +144,69 @@ const ContactListPage = () => {
   };
 
   const handleIncrement = async (id) => {
-    const sourceTable = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
-    const targetTable = 'inactiveContacts';
-  
-    const currentContacts = selectedTable === 'active' ? activeContacts : inactiveContacts;
-    const contact = currentContacts.find(c => c.id === id);
-  
+    const table = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+    const list = selectedTable === 'active' ? activeContacts : inactiveContacts;
+    const contact = list.find(c => c.id === id);
     if (!contact) return;
   
-    const currentCount = parseInt(contact.noResponse || 0, 10); // Convert to number safely
-    const updatedNoResponse = currentCount + 1;
-  
-    // Automatically check the contacted checkbox if noResponse > 0
-    const updatedContact = { 
-      ...contact, 
-      noResponse: updatedNoResponse,
-      contacted: updatedNoResponse > 0 // If noResponse > 0, set contacted to true
-    };
+    const updatedNoResponse = (parseInt(contact.noResponse || 0, 10)) + 1;
+    const updatedContact = { ...contact, noResponse: updatedNoResponse };
   
     try {
-      const q = query(collection(db, sourceTable), where("id", "==", id));
+      // update Firestore count only
+      const q = query(collection(db, table), where("id", "==", id));
       const snapshot = await getDocs(q);
+      for (const docSnap of snapshot.docs) {
+        const ref = doc(db, table, docSnap.id);
+        await updateDoc(ref, { noResponse: updatedNoResponse });
+      }
   
-      snapshot.forEach(async (docSnap) => {
-        const ref = doc(db, sourceTable, docSnap.id);
-  
-        if (updatedNoResponse >= 3 && selectedTable === 'active') {
-          // Move contact to inactive table if noResponse >= 3
-          await updateDoc(ref, { noResponse: updatedNoResponse, contacted: updatedContact.contacted });
-          await deleteDoc(ref);
-  
-          // Add to inactive table
-          await addDoc(collection(db, targetTable), updatedContact);
-  
-          // Update local state
-          setActiveContacts(activeContacts.filter(c => c.id !== id));
-          setInactiveContacts([...inactiveContacts, updatedContact]);
-        } else {
-          // Just update noResponse and contacted in the current table
-          await updateDoc(ref, { noResponse: updatedNoResponse, contacted: updatedContact.contacted });
-  
-          if (selectedTable === 'active') {
-            setActiveContacts(
-              activeContacts.map(c => 
-                c.id === id ? updatedContact : c
-              )
-            );
-          } else {
-            setInactiveContacts(
-              inactiveContacts.map(c => 
-                c.id === id ? updatedContact : c
-              )
-            );
-          }
-        }
-      });
+      // update local state
+      if (selectedTable === 'active') {
+        setActiveContacts(
+          activeContacts.map(c => c.id === id ? updatedContact : c)
+        );
+      } else {
+        setInactiveContacts(
+          inactiveContacts.map(c => c.id === id ? updatedContact : c)
+        );
+      }
     } catch (error) {
       console.error("Error updating noResponse in Firestore:", error);
     }
   };
   
-
-  const handleDecrement = (id) => {
+  const handleDecrement = async (id) => {
+    // Figure out which table & list we’re working with
+    const table = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
+    const list  = selectedTable === 'active' ? activeContacts   : inactiveContacts;
+    const contact = list.find(c => c.id === id);
+    if (!contact || contact.noResponse <= 0) return;
+  
+    // Compute new count
+    const updatedNoResponse = contact.noResponse - 1;
+    const updatedContact  = { ...contact, noResponse: updatedNoResponse };
+  
+    // 1) Optimistically update UI
     if (selectedTable === 'active') {
-      setActiveContacts(
-        activeContacts.map(contact =>
-          contact.id === id && contact.noResponse > 0
-            ? {
-                ...contact,
-                noResponse: contact.noResponse - 1,
-                contacted: (contact.noResponse - 1) > 0 // Uncheck the checkbox if noResponse becomes 0
-              }
-            : contact
-        )
-      );
+      setActiveContacts(activeContacts.map(c => c.id === id ? updatedContact : c));
     } else {
-      setInactiveContacts(
-        inactiveContacts.map(contact =>
-          contact.id === id && contact.noResponse > 0
-            ? {
-                ...contact,
-                noResponse: contact.noResponse - 1,
-                contacted: (contact.noResponse - 1) > 0 // Uncheck the checkbox if noResponse becomes 0
-              }
-            : contact
-        )
-      );
+      setInactiveContacts(inactiveContacts.map(c => c.id === id ? updatedContact : c));
+    }
+  
+    // 2) Persist just the noResponse change to Firestore
+    try {
+      const q = query(collection(db, table), where("id", "==", id));
+      const snap = await getDocs(q);
+      for (const docSnap of snap.docs) {
+        const ref = doc(db, table, docSnap.id);
+        await updateDoc(ref, { noResponse: updatedNoResponse });
+      }
+    } catch (err) {
+      console.error("Error decrementing noResponse in Firestore:", err);
     }
   };
+  
 
   const handleDeleteContact = async (id) => {
     const table = selectedTable === 'active' ? 'activeContacts' : 'inactiveContacts';
@@ -508,39 +483,38 @@ const ContactListPage = () => {
       </button>
 
       {/* Table Container */}
-      <div className="overflow-auto w-full">
+      <div className="w-full max-h-[60vh] overflow-y-auto">
         <table className="min-w-full table-fixed bg-white shadow-md rounded-lg">
-          <thead className="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+          <thead className="text-gray-600 uppercase text-sm leading-normal">
             <tr>
-              <th className="py-3 px-4 text-left h-12 w-32">Name</th>
-              <th className="py-3 px-4 text-left h-12 w-32">Who Contacts</th>
-              <th className="py-3 px-4 text-center h-12 w-24">Contacted</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">Name</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">Who Contacts</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-center h-12 w-24">Contacted</th>
               <th
-                className="py-3 px-4 text-left h-12"
+                className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12"
                 style={{ minWidth: '8rem', maxWidth: '8rem', width: '8rem' }}
               >
                 Contact Notes
               </th>
-              <th className="py-3 px-4 text-center h-12 w-24">No Response</th>
-              <th className="py-3 px-4 text-left h-12 w-32">Text/DM</th>
-              <th className="py-3 px-4 text-left h-12 w-32">General Notes</th>
-              <th className="py-3 px-4 text-left h-12 w-32">Events</th>
-              <th className="py-3 px-4 text-left h-12 w-32">Phone #</th>
-              <th className="py-3 px-4 text-left h-12 w-32">IG Handle / Email</th>
-              <th className="py-3 px-4 text-center h-12 w-32">Actions</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-center h-12 w-24">No Response</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">Text/DM</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">General Notes</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">Events</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">Phone #</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-left h-12 w-32">IG Handle / Email</th>
+              <th className="sticky top-0 bg-gray-200 z-10 py-3 px-4 text-center h-12 w-32">Actions</th>
             </tr>
           </thead>
           <tbody className="text-gray-600 text-sm font-light">
-            {filteredContacts.map((contact) => (
-              <tr
-                key={contact.id}
-                className={`border-b border-gray-200 transition duration-200 ${
-                  contact.noResponse === 3
-                    ? 'bg-red-500 text-white'
-                    : contact.contacted
-                    ? 'bg-green-500 text-white'
-                    : 'hover:bg-gray-100'
-                }`}
+            {filteredContacts.map(contact => (
+              <tr key={contact.id}
+                 className={`border-b border-gray-200 transition duration-200 ${
+                   contact.noResponse >= 3
+                      ? 'bg-red-500 text-white'
+                     : contact.contacted
+                     ? 'bg-green-500 text-white'
+                     : 'hover:bg-gray-100'
+                 }`}
               >
                 <td className="w-32 h-12">
                   <div style={fixedCellStyle} className="cursor-pointer" onClick={() => openCellModal(contact.name)}>

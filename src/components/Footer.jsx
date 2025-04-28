@@ -26,8 +26,7 @@ const Footer = () => {
       </div>
       
       <div className="text-sm text-gray-400 mb-6">
-        <p>Email: info@gravitynonprofit.org</p>
-        <p>Phone: (123) 456-7890</p>
+        <p>Email: gravityitdrawsyouin@gmail.com</p>
       </div>
 
       {/* Staff Login Button */}
